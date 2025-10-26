@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Scanner Profile Manager</title>
+    <link rel="stylesheet" href="/style/css.css">
+    
+    <!-- Préchargement des modules critiques pour de meilleures performances -->
+    <link rel="modulepreload" href="main.js">
+    <link rel="modulepreload" href="app-manager.js">
+    <link rel="modulepreload" href="profile-manager.js">
+    <link rel="modulepreload" href="utils.js">
+    <link rel="modulepreload" href="config.js">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Gestionnaire de profils de scanner</h1>
+        </div>
+
+        <div class="controls">
+            <button id="btnRefresh" class="btn-primary" aria-label="Actualiser la liste des profils">🔄 Actualiser</button>
+            <button id="btnAddProfile" class="btn-success" aria-label="Créer un nouveau profil">➕ Nouveau profil</button>
+            <button id="btnEdit" class="btn-warning" disabled aria-label="Modifier le profil sélectionné">✏️ Modifier</button>
+            <button id="btnDelete" class="btn-danger" disabled aria-label="Supprimer le profil sélectionné">🗑 Supprimer</button>
+            <button id="btnScan" class="btn-primary" disabled aria-label="Scanner avec le profil sélectionné">📄 Scanner</button>
+            <button id="btnScanPatch" class="btn-success" disabled aria-label="Scanner et traiter avec Patch automatique">🚀 Scan & Patch</button>
+        </div>
+        
+        <div class="config-bar">
+            <div class="config-container">
+                <h4>Liste de profils</h4>
+            </div>
+            <div class="config-actions">
+                <button class="theme-toggle" id="themeToggle" title="Changer de thème">🌙</button>
+                <a href="http://localhost:3000/api-docs" target="_blank" class="btn-config" aria-label="Paramètres et configuration">⚙️</a>
+            </div>
+        </div>
+        
+        <div id="scannersGrid" class="scanners-grid" role="grid">
+            <p class="loading-message">Chargement des profils...</p>
+        </div>
+
+        <!-- Zone d'importation -->
+        <div class="import-zone" id="importZone" role="region" aria-label="Zone d'importation de fichiers">
+            <p>📂 Glissez-déposez un fichier ici ou utilisez les boutons ci-dessous</p>
+            <input type="file" id="fileInput" hidden accept=".pdf,.jpg,.jpeg,.png,.tiff,.tif">
+            <div class="import-buttons">
+                <button id="btnUnifiedProcessing" class="btn-success" disabled aria-label="Lancer le traitement unifié">⚙️ Traitement</button>
+                <button id="btnGeneratePatch" class="btn-info" aria-label="Générer un patch">🏷️ Générer Patch</button>
+                <button id="btnImportFile" class="btn-primary" aria-label="Importer un fichier">📂 Importer un fichier</button>
+            </div>
+            <div id="importedFileName" class="file-info" aria-live="polite"></div>
+        </div>
+    </div>
+
+    <!-- Popup Traitement Unifié -->
+    <div id="unifiedProcessingPopup" class="popup" role="dialog" aria-labelledby="unified-title" aria-hidden="true">
+        <div class="popup-content">
+            <div class="popup-header">
+                <h3 id="unified-title">Traitement de Document</h3>
+                <button onclick="closeUnifiedProcessingPopup()" class="close-btn" aria-label="Fermer">×</button>
+            </div>
+            <div class="popup-body">
+                <form id="unifiedProcessingForm" enctype="multipart/form-data">
+                    
+                    <!-- Section Mode de traitement -->
+                    <div class="form-group">
+                        <label>Mode de traitement :</label>
+                        <div class="processing-options">
+                            <div class="processing-option" data-mode="ocr">
+                                <input type="checkbox" id="ocrMode" name="processingMode" value="ocr">
+                                <div class="option-content">
+                                    <div class="option-icon">🔎</div>
+                                    <div class="option-title">OCR</div>
+                                </div>
+                            </div>
+
+                            <div class="processing-option" data-mode="patch">
+                                <input type="checkbox" id="patchMode" name="processingMode" value="patch">
+                                <div class="option-content">
+                                    <div class="option-icon">📋</div>
+                                    <div class="option-title">Patch</div>
+                                </div>
+                            </div>
+                            <div class="processing-option" data-mode="pdfaOnly">
+                                <input type="checkbox" id="pdfaOnlyMode" name="processingMode" value="pdfaOnly">
+                                <div class="option-content">
+                                    <div class="option-icon">📄</div>
+                                    <div class="option-title">PDF/A</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group" id="pdfModeGroup">
+                        <label for="unifiedPdfMode">Format de sortie PDF :</label>
+                        <select name="mode" id="unifiedPdfMode">
+                            <option value="pdfa" selected>📚 PDF/A (Recommandé)</option>
+                            <option value="pdf">📄 PDF Standard</option>
+                        </select>
+                    </div>
+                    <!-- Section OCR (cachée par défaut) -->
+                    <div id="ocrOptions" class="processing-section" style="display: none;">
+                        <h4>📝 Options OCR</h4>
+                        
+                        <div class="form-group">
+                            <label for="unifiedOcrLang">Langue de reconnaissance :</label>
+                            <select name="lang" id="unifiedOcrLang">
+                                <option value="">🌐 Détection automatique</option>
+                                <option value="ara">🇸🇦 العربية (Arabe)</option>
+                                <option value="fra" selected>🇫🇷 Français</option>
+                                <option value="eng">🇺🇸 English (Anglais)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="unifiedModeOcr">Mode de traitement OCR :</label>
+                            <select name="modeOcr" id="unifiedModeOcr">
+                                <option value="auto" selected>🔄 Automatique (Recommandé)</option>
+                                <option value="force">⚡ Forcer l'OCR</option>
+                                <option value="skip">⏭️ Ignorer l'OCR</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Section Patch (cachée par défaut) -->
+                    <div id="patchOptions" class="processing-section" style="display: none;">
+                        <h4>📋 Options Patch</h4>
+                        
+                        <div class="form-group">
+                            <label for="unifiedPatchMode">Mode de traitement :</label>
+                            <select name="patchMode" id="unifiedPatchMode">
+                                <option value="T_classique" selected>⚡ Traitement avec multi-fichiers</option>
+                                <option value="T_with_bookmarks">🔖 Traitement avec un seul fichier</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label for="unifiedPatchNaming">Préfixe:</label>
+                            <select name="naming" id="unifiedPatchNaming">
+                                <option value="barcode_ocr_generic" selected>🎯 Code-barres → OCR → Générique</option>
+                                <option value="barcode">📊 Code-barres uniquement</option>
+                                <option value="ocr">🔤 OCR de texte uniquement</option>
+                                <option value="generic">📝 Nommage générique</option>
+                                <option value="aucun">📝 Aucun</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- Section Nommage (toujours visible) -->
+                    <div class="form-group">
+                        <label for="unifiedNamingPattern">Suffixe :</label>
+                        
+                        <div class="naming-pattern-builder">
+                            <div class="pattern-input-container">
+                                <input type="text" name="namingPattern" id="unifiedNamingPattern" class="pattern-input" 
+                                       value="$(YYYY)$(MM)$(DD)" placeholder="Construisez votre modèle...">
+                                <button type="button" class="clear-pattern-btn" onclick="clearUnifiedPattern()" title="Effacer tout">🗑</button>
+                            </div>
+                            
+                            <div class="pattern-preview">
+                                <strong>Aperçu :</strong> <span id="unifiedPreview">20240314</span>
+                            </div>
+                            
+                            <div class="substitutions-section">
+                                <div class="section-title">📅 Date et Heure</div>
+                                <div class="substitution-grid">
+                                    <div class="substitution-item" onclick="addToUnifiedPattern('$(YYYY)')">
+                                        <div class="substitution-code">$(YYYY)</div>
+                                    </div>
+                                    <div class="substitution-item" onclick="addToUnifiedPattern('$(YY)')">
+                                        <div class="substitution-code">$(YY)</div>
+                                    </div>
+                                    <div class="substitution-item" onclick="addToUnifiedPattern('$(MM)')">
+                                        <div class="substitution-code">$(MM)</div>
+                                    </div>
+                                    <div class="substitution-item" onclick="addToUnifiedPattern('$(DD)')">
+                                        <div class="substitution-code">$(DD)</div>
+                                    </div>
+                                    <div class="substitution-item" onclick="addToUnifiedPattern('$(HH)')">
+                                        <div class="substitution-code">$(HH)</div>
+                                    </div>
+                                    <div class="substitution-item" onclick="addToUnifiedPattern('$(mm)')">
+                                        <div class="substitution-code">$(mm)</div>
+                                    </div>
+                                    <div class="substitution-item" onclick="addToUnifiedPattern('$(ss)')">
+                                        <div class="substitution-code">$(ss)</div>
+                                    </div>
+                                </div>
+                                
+                                <div class="section-title">🔢 Numéros</div>
+                                <div class="substitution-grid">
+                                    <div class="substitution-item" onclick="addToUnifiedPattern('$(nnn)')">
+                                        <div class="substitution-code">$(nnn)</div>
+                                    </div>
+                                    <div class="substitution-item" onclick="addToUnifiedPattern('$(nn)')">
+                                        <div class="substitution-code">$(nn)</div>
+                                    </div>
+                                    <div class="substitution-item" onclick="addToUnifiedPattern('$(n)')">
+                                        <div class="substitution-code">$(n)</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="popup-buttons">
+                        <button type="button" onclick="closeUnifiedProcessingPopup()">Annuler</button>
+                        <button type="submit" class="btn-primary">🚀 Lancer le traitement</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Popup Générer Patch -->
+    <div id="generatePatchPopup" class="popup" role="dialog" aria-labelledby="generate-patch-title" aria-hidden="true">
+        <div class="popup-content">
+            <div class="popup-header">
+                <h3 id="generate-patch-title">Générer un séparateur de document</h3>
+                <button onclick="closeGeneratePatchPopup()" class="close-btn" aria-label="Fermer">×</button>
+            </div>
+            <div class="popup-body">
+                <form id="generatePatchForm">
+                    <div class="form-group">
+                         <input type="hidden" name="generatePatch"  value="true">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="patchDataInput">Texte du séparateur :</label>
+                        <input type="text" name="patchData" id="patchDataInput" placeholder="Ex: NOUVEAU DOCUMENT" maxlength="100" required>
+                    </div>
+
+                    <div class="popup-buttons">
+                        <button type="button" onclick="closeGeneratePatchPopup()">Annuler</button>
+                        <button type="submit" class="btn-primary">🏷️ Générer la page de séparation</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Popup pour ajout avec onglets -->
+    <div id="addPopup" class="popup" role="dialog" aria-labelledby="add-title" aria-hidden="true">
+        <div class="popup-content">
+            <div class="popup-header">
+                <h3 id="add-title">Nouveau profil</h3>
+                <button onclick="closeAddPopup()" class="close-btn" aria-label="Fermer">×</button>
+            </div>
+
+            <div class="tab-container">
+                <div class="tab-navigation" role="tablist">
+                    <button class="tab-btn active" role="tab" aria-controls="general-tab" onclick="switchTab(event,'general-tab')">🔧 Général</button>
+                    <button class="tab-btn" role="tab" aria-controls="scan-tab" onclick="switchTab(event,'scan-tab')">📄 Numérisation</button>
+                    <button class="tab-btn" role="tab" aria-controls="advanced-tab" onclick="switchTab(event,'advanced-tab')">⚙️ Avancé</button>
+                    <button class="tab-btn" role="tab" aria-controls="ocr-tab" onclick="switchTab(event,'ocr-tab')">🔎 Patch</button>
+                </div>
+
+                <div class="tab-content">
+                    <form id="profileAddForm">
+                        <div id="general-tab" class="tab-pane active" role="tabpanel"></div>
+                        <div id="scan-tab" class="tab-pane" role="tabpanel"></div>
+                        <div id="advanced-tab" class="tab-pane" role="tabpanel"></div>
+                        <div id="ocr-tab" class="tab-pane" role="tabpanel"></div>
+                    </form>
+                    <div class="tab-popup-buttons">
+                        <button type="button" onclick="closeAddPopup()">Annuler</button>
+                        <button type="submit" form="profileAddForm" class="btn-primary">Créer le profil</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Popup pour édition avec onglets -->
+    <div id="editPopup" class="popup" role="dialog" aria-labelledby="edit-title" aria-hidden="true">
+        <div class="popup-content">
+            <div class="popup-header">
+                <h3 id="edit-title">Modifier le profil</h3>
+                <button onclick="closeEditPopup()" class="close-btn" aria-label="Fermer">×</button>
+            </div>
+            
+            <div class="tab-container">
+                <div class="tab-navigation" role="tablist">
+                    <button class="tab-btn active" role="tab" aria-controls="edit-general-tab" onclick="switchTab(event, 'edit-general-tab')">
+                        🔧 Général
+                    </button>
+                    <button class="tab-btn" role="tab" aria-controls="edit-scan-tab" onclick="switchTab(event, 'edit-scan-tab')">
+                        📄 Numérisation
+                    </button>
+                    <button class="tab-btn" role="tab" aria-controls="edit-advanced-tab" onclick="switchTab(event, 'edit-advanced-tab')">
+                        ⚙️ Avancé
+                    </button>
+                    <button class="tab-btn" role="tab" aria-controls="edit-ocr-tab" onclick="switchTab(event, 'edit-ocr-tab')">
+                        🔎 Patch
+                    </button>
+                </div>
+
+                <div class="tab-content">
+                    <form id="profileEditForm">
+                        <div id="edit-general-tab" class="tab-pane active" role="tabpanel">
+                            <div id="editGeneralContent"></div>
+                        </div>
+                        <div id="edit-scan-tab" class="tab-pane" role="tabpanel">
+                            <div id="editScanContent"></div>
+                        </div>
+                        <div id="edit-advanced-tab" class="tab-pane" role="tabpanel">
+                            <div id="editAdvancedContent"></div>
+                        </div>
+                        <div id="edit-ocr-tab" class="tab-pane" role="tabpanel">
+                            <div id="editOcrContent"></div>
+                        </div>
+                        <div class="tab-popup-buttons">
+                            <button type="button" onclick="closeEditPopup()">Annuler</button>
+                            <button type="submit" form="profileEditForm" class="btn-primary">Sauvegarder</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Script principal - MODULES ES6 -->
+    <script type="module" src="main.js"></script>
+
+    <!-- Scripts utilitaires pour l'interface (sans modules pour compatibilité) -->
+    <script>
+        // Fonctions utilitaires globales pour les patterns de nommage
+        function updateUnifiedPreview() {
+            const pattern = document.getElementById('unifiedNamingPattern')?.value || '';
+            const now = new Date();
+            
+            let preview = pattern
+                .replace(/\$\(YYYY\)/g, now.getFullYear().toString())
+                .replace(/\$\(YY\)/g, now.getFullYear().toString().substr(-2))
+                .replace(/\$\(MM\)/g, String(now.getMonth() + 1).padStart(2, '0'))
+                .replace(/\$\(DD\)/g, String(now.getDate()).padStart(2, '0'))
+                .replace(/\$\(HH\)/g, String(now.getHours()).padStart(2, '0'))
+                .replace(/\$\(mm\)/g, String(now.getMinutes()).padStart(2, '0'))
+                .replace(/\$\(ss\)/g, String(now.getSeconds()).padStart(2, '0'))
+                .replace(/\$\(nnn\)/g, '001')
+                .replace(/\$\(nn\)/g, '01')
+                .replace(/\$\(n\)/g, '1');
+            
+            const previewElement = document.getElementById('unifiedPreview');
+            if (previewElement) {
+                previewElement.textContent = preview || '(vide)';
+            }
+        }
+
+        function addToUnifiedPattern(code) {
+            const input = document.getElementById('unifiedNamingPattern');
+            if (!input) return;
+            
+            const start = input.selectionStart || 0;
+            const end = input.selectionEnd || 0;
+            const value = input.value;
+            input.value = value.substring(0, start) + code + value.substring(end);
+            const newPos = start + code.length;
+            input.setSelectionRange(newPos, newPos);
+            input.focus();
+            updateUnifiedPreview();
+        }
+
+        function clearUnifiedPattern() {
+            const input = document.getElementById('unifiedNamingPattern');
+            if (!input) return;
+            
+            input.value = '';
+            updateUnifiedPreview();
+            input.focus();
+        }
+
+        // Fonctions de fermeture des popups (fallback si les modules ne sont pas chargés)
+        function closeUnifiedProcessingPopup() {
+            const popup = document.getElementById('unifiedProcessingPopup');
+            if (popup) popup.style.display = 'none';
+        }
+
+        function closeGeneratePatchPopup() {
+            const popup = document.getElementById('generatePatchPopup');
+            if (popup) popup.style.display = 'none';
+        }
+
+        function closeViewPopup() {
+            const popup = document.getElementById('viewPopup');
+            if (popup) popup.style.display = 'none';
+        }
+
+        function closeAddPopup() {
+            const popup = document.getElementById('addPopup');
+            if (popup) popup.style.display = 'none';
+        }
+
+        function closeEditPopup() {
+            const popup = document.getElementById('editPopup');
+            if (popup) popup.style.display = 'none';
+        }
+
+        function switchTab(event, tabId) {
+            const tabContainer = event.target.closest('.tab-container');
+            if (!tabContainer) return;
+            
+            // Masquer tous les onglets
+            tabContainer.querySelectorAll('.tab-pane').forEach(pane => pane.classList.remove('active'));
+            tabContainer.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            
+            // Activer l'onglet sélectionné
+            const targetTab = document.getElementById(tabId);
+            if (targetTab) {
+                targetTab.classList.add('active');
+                event.target.classList.add('active');
+            }
+        }
+
+        // Initialisation des événements quand le DOM est prêt
+        document.addEventListener('DOMContentLoaded', function() {
+            const patternInput = document.getElementById('unifiedNamingPattern');
+            if (patternInput) {
+                patternInput.addEventListener('input', updateUnifiedPreview);
+                updateUnifiedPreview();
+            }
+        });
+
+        // Fallback si les modules ES6 ne sont pas supportés
+        if (!window.Promise ) {
+            document.body.innerHTML = `
+                <div style="padding: 40px; text-align: center; background: #fff3cd; border: 1px solid #ffeaa7; margin: 20px; border-radius: 8px;">
+                    <h2 style="color: #856404;">Navigateur non compatible</h2>
+                    <p>Cette application nécessite un navigateur moderne supportant les modules ES6.</p>
+                    <p>Veuillez mettre à jour votre navigateur ou utiliser une version récente de Chrome, Firefox, Safari ou Edge.</p>
+                    <button onclick="location.reload()" style="padding: 10px 20px; background: #ffc107; border: none; border-radius: 4px; cursor: pointer;">
+                        Réessayer
+                    </button>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>
