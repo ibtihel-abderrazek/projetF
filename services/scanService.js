@@ -1,39 +1,45 @@
-// services/scanService.js - VERSION COMPLÈTE CORRIGÉE
-
+// services/scanService.js
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const xml2js = require('xml2js'); // ✅ Ajouter xml2js
 
 const naps2Path = path.join(__dirname, '..', 'bin', 'naps2', 'App', 'NAPS2.Console.exe');
 const outputDir = path.join(__dirname, '..', 'output');
-const profilesPath = path.join(__dirname, '..', 'data', 'profiles.json');
+const profilesPath = path.join(__dirname, '..', 'bin', 'naps2', 'Data', 'profiles.xml'); // ✅ CORRECTION
 
 if (!fs.existsSync(outputDir)) {
   fs.mkdirSync(outputDir, { recursive: true });
 }
 
 /**
- * 🔧 Charge la configuration d'un profil depuis profiles.json
+ * 🔧 Charge la configuration d'un profil depuis profiles.xml (VERSION CORRIGÉE)
  */
-function loadProfileConfig(profileName) {
+async function loadProfileConfig(profileName) {
   try {
     if (!fs.existsSync(profilesPath)) {
-      console.warn(`⚠️ Fichier profiles.json introuvable: ${profilesPath}`);
+      console.warn(`⚠️ Fichier profiles.xml introuvable: ${profilesPath}`);
       return null;
     }
     
-    const profilesData = JSON.parse(fs.readFileSync(profilesPath, 'utf-8'));
+    // ✅ Lire et parser le fichier XML
+    const xmlContent = fs.readFileSync(profilesPath, 'utf-8');
+    const xmlObj = await xml2js.parseStringPromise(xmlContent, { explicitArray: true });
     
-    if (!profilesData[profileName]) {
-      console.warn(`⚠️ Profil "${profileName}" non trouvé dans profiles.json`);
+    // ✅ Trouver le profil par DisplayName
+    const profiles = xmlObj?.ArrayOfScanProfile?.ScanProfile || [];
+    const profile = profiles.find(p => p?.DisplayName?.[0] === profileName);
+    
+    if (!profile) {
+      console.warn(`⚠️ Profil "${profileName}" non trouvé dans profiles.xml`);
       return null;
     }
     
-    console.log(`✅ Profil "${profileName}" chargé depuis profiles.json`);
-    return profilesData[profileName];
+    console.log(`✅ Profil "${profileName}" chargé depuis profiles.xml`);
+    return profile;
     
   } catch (error) {
-    console.error(`❌ Erreur lecture profiles.json:`, error.message);
+    console.error(`❌ Erreur lecture profiles.xml:`, error.message);
     return null;
   }
 }
@@ -57,129 +63,119 @@ function extractValue(value) {
 }
 
 /**
- * 🔧 Extrait les informations du device depuis le profil
+ * 🔧 Extrait les informations du device depuis le profil (VERSION AMÉLIORÉE)
  */
 function extractDeviceInfo(profile) {
   let deviceName = null;
   let deviceId = null;
-  let driver = null; // ✅ Ne pas forcer de valeur par défaut
+  let driver = null;
   
-  console.log(`🔍 Profil brut:`, JSON.stringify(profile, null, 2));
+  console.log(`🔍 === EXTRACTION DEVICE INFO ===`);
   
-  // ✅ PRIORITÉ 1: Lire explicitement le DriverName du profil
+  // ✅ PRIORITÉ 1: Lire le DriverName du profil
   if (profile.DriverName) {
     driver = extractValue(profile.DriverName);
-    console.log(`✅ DriverName explicite trouvé: ${driver}`);
+    console.log(`✅ DriverName du profil: "${driver}"`);
   }
   
-  // Recherche dans Device (objet)
-  if (profile.Device && typeof profile.Device === 'object') {
-    deviceName = extractValue(profile.Device.Name);
-    deviceId = extractValue(profile.Device.ID);
+  // ✅ PRIORITÉ 2: Extraire Device.Name et Device.ID
+  if (profile.Device && profile.Device[0]) {
+    if (profile.Device[0].Name) {
+      deviceName = extractValue(profile.Device[0].Name);
+      console.log(`✅ Device.Name: "${deviceName}"`);
+    }
+    
+    if (profile.Device[0].ID) {
+      deviceId = extractValue(profile.Device[0].ID);
+      console.log(`✅ Device.ID: "${deviceId}"`);
+    }
   }
   
-  // Recherche dans Device (string direct)
-  if (!deviceName && profile.Device && typeof profile.Device === 'string') {
-    deviceName = profile.Device;
-  }
-  
-  // Fallback sur Device.Name et Device.ID (format flat)
-  if (!deviceName && profile['Device.Name']) {
-    deviceName = extractValue(profile['Device.Name']);
-  }
-  
-  if (!deviceId && profile['Device.ID']) {
-    deviceId = extractValue(profile['Device.ID']);
-  }
-  
-  // Fallback sur DeviceName et DeviceID (ancien format)
-  if (!deviceName && profile.DeviceName) {
-    deviceName = extractValue(profile.DeviceName);
-  }
-  
-  if (!deviceId && profile.DeviceID) {
-    deviceId = extractValue(profile.DeviceID);
-  }
-  
-  // ✅ PRIORITÉ 2: Si pas de DriverName explicite, détecter depuis le device
+  // ✅ Si pas de driver explicite, essayer de le détecter
   if (!driver && (deviceName || deviceId)) {
     const name = (deviceName || deviceId).toLowerCase();
+    console.log(`🔍 Tentative de détection du driver depuis: "${name}"`);
     
-    console.log(`🔍 Analyse du device pour détecter driver: "${name}"`);
-    
-    // Pattern WIA : ID hexadécimal style "EPSON9ABE4C" ou contient "wia"
+    // Pattern WIA : ID hexadécimal ou contient "wia"
     if (name.match(/[a-f0-9]{6,}/i) || name.includes('wia')) {
       driver = 'wia';
-      console.log(`✅ Driver WIA détecté (pattern hexadécimal ou mention 'wia')`);
+      console.log(`✅ Driver WIA détecté`);
     }
     // Pattern TWAIN : contient "series" ou "twain"
     else if (name.includes('series') || name.includes('twain')) {
       driver = 'twain';
-      console.log(`✅ Driver TWAIN détecté (pattern series/twain)`);
+      console.log(`✅ Driver TWAIN détecté`);
     }
-    // Dernier recours: WIA par défaut (plus stable)
     else {
       driver = 'wia';
       console.log(`⚠️ Driver non détecté, utilisation de WIA par défaut`);
     }
   }
   
-  // ✅ Sécurité finale
+  // ✅ Fallback final
   if (!driver) {
     driver = 'wia';
-    console.log(`⚠️ Aucun driver détecté, fallback sur WIA`);
+    console.log(`⚠️ Fallback final sur WIA`);
   }
   
-  console.log(`📋 Device extrait: Name="${deviceName}", ID="${deviceId}", Driver="${driver}"`);
+  console.log(`📋 === RÉSULTAT EXTRACTION ===`);
+  console.log(`   Device.Name: "${deviceName}"`);
+  console.log(`   Device.ID: "${deviceId}"`);
+  console.log(`   Driver: "${driver}"`);
   
   return { deviceName, deviceId, driver };
 }
 
 /**
- * 🔧 Lance un scan avec NAPS2
+ * 🔧 Lance un scan avec NAPS2 (VERSION FINALE)
  */
 async function scanFile(profileName, outputPath = null) {
   try {
-    console.log(`📠 Démarrage du scan avec le profil: ${profileName}`);
+    console.log(`\n📠 === DÉMARRAGE DU SCAN ===`);
+    console.log(`📋 Profil demandé: "${profileName}"`);
     
-    // ✅ Charger la configuration du profil
-    const profile = loadProfileConfig(profileName);
+    // ✅ Charger la configuration du profil depuis XML
+    const profile = await loadProfileConfig(profileName);
     
-    let driver = 'wia'; // Par défaut WIA (plus stable)
+    if (!profile) {
+      console.warn(`⚠️ Profil "${profileName}" non trouvé dans profiles.xml`);
+      console.warn(`⚠️ NAPS2 va essayer d'utiliser le scanner par défaut`);
+    }
+    
+    let driver = 'wia';
     let deviceArg = null;
     
     if (profile) {
       const { deviceName, deviceId, driver: detectedDriver } = extractDeviceInfo(profile);
       driver = detectedDriver;
       
-      // Priorité : utiliser deviceId si disponible, sinon deviceName
+      // ✅ Utiliser deviceId en priorité
       deviceArg = deviceId || deviceName;
       
-      if (deviceArg) {
-        console.log(`✅ Configuration chargée: Driver="${driver}", Device="${deviceArg}"`);
-      } else {
+      console.log(`📋 Configuration du profil:`, {
+        driver: driver,
+        deviceName: deviceName,
+        deviceId: deviceId,
+        deviceArgUsed: deviceArg
+      });
+      
+      if (!deviceArg) {
         console.warn(`⚠️ Aucun device trouvé dans le profil, NAPS2 utilisera le scanner par défaut`);
       }
-    } else {
-      console.warn(`⚠️ Profil "${profileName}" non trouvé, utilisation de WIA avec scanner par défaut`);
     }
     
-    // ✅ CORRECTION CRITIQUE: Générer un nom de fichier COMPLET
+    // ✅ Générer un nom de fichier
     const timestamp = Date.now();
     let outputPattern;
     
     if (outputPath) {
-      // Si un chemin est fourni, vérifier s'il contient un nom de fichier
       const ext = path.extname(outputPath);
       if (ext) {
-        // C'est un chemin complet avec nom de fichier
         outputPattern = outputPath;
       } else {
-        // C'est juste un dossier, ajouter le nom de fichier
         outputPattern = path.join(outputPath, `${profileName}_scan_${timestamp}.pdf`);
       }
     } else {
-      // Pas de chemin fourni, utiliser outputDir par défaut
       outputPattern = path.join(outputDir, `${profileName}_scan_${timestamp}.pdf`);
     }
     
@@ -191,9 +187,12 @@ async function scanFile(profileName, outputPath = null) {
       '--profile', profileName
     ];
     
-    // Ajouter le device si disponible
+    // ✅ Ajouter le device s'il est défini
     if (deviceArg) {
       args.push('--device', deviceArg);
+      console.log(`📡 Device spécifié: "${deviceArg}"`);
+    } else {
+      console.log(`📡 Pas de device spécifié, NAPS2 utilisera le scanner par défaut`);
     }
     
     args.push(
@@ -202,7 +201,10 @@ async function scanFile(profileName, outputPath = null) {
       '-v'
     );
     
-    console.log(`📠 Commande NAPS2: ${naps2Path} ${args.join(' ')}`);
+    console.log(`\n🚀 Commande NAPS2:`);
+    console.log(`   ${naps2Path}`);
+    console.log(`   Arguments: ${args.join(' ')}`);
+    console.log(``);
     
     // Lancer NAPS2
     return new Promise((resolve, reject) => {
@@ -218,7 +220,6 @@ async function scanFile(profileName, outputPath = null) {
         const output = data.toString();
         stdout += output;
         
-        // Filtrer les warnings connus (Qt version)
         if (output.includes('Untested Windows version')) {
           console.log(`⚠️ NAPS2 warning (ignoré): ${output.trim()}`);
         } else {
@@ -238,85 +239,80 @@ async function scanFile(profileName, outputPath = null) {
       });
       
       naps2Process.on('close', (code) => {
-        console.log(`NAPS2 terminé avec le code: ${code}`);
+        console.log(`\n📊 NAPS2 terminé avec le code: ${code}`);
         
-        // ✅ CORRECTION: Chercher le fichier généré par NAPS2
-        // NAPS2 peut ajouter (1), (2), etc. ou utiliser le pattern exact
-        const possibleFiles = [
-          outputPattern,
-          outputPattern.replace('.pdf', ' (1).pdf'),
-          outputPattern.replace('.pdf', '(1).pdf')
-        ];
+        if (code !== 0) {
+          console.error(`❌ Erreur NAPS2 (code ${code})`);
+          console.error(`📋 stdout:`, stdout);
+          console.error(`📋 stderr:`, stderr);
+        }
         
-        // Chercher aussi tous les PDF créés récemment dans le dossier
+        // ✅ Chercher le fichier généré
+        const searchDir = path.dirname(outputPattern);
+        
         try {
-          const searchDir = path.dirname(outputPattern);
           const recentFiles = fs.readdirSync(searchDir)
             .filter(f => f.endsWith('.pdf') && f.includes(profileName))
             .map(f => ({
               name: f,
               path: path.join(searchDir, f),
-              time: fs.statSync(path.join(searchDir, f)).mtime
+              time: fs.statSync(path.join(searchDir, f)).mtime,
+              size: fs.statSync(path.join(searchDir, f)).size
             }))
             .sort((a, b) => b.time - a.time);
           
+          console.log(`\n🔍 Recherche de fichiers PDF dans: ${searchDir}`);
+          console.log(`   Critère: fichiers contenant "${profileName}"`);
+          console.log(`   Fichiers trouvés: ${recentFiles.length}`);
+          
           if (recentFiles.length > 0) {
+            recentFiles.forEach((f, i) => {
+              console.log(`   ${i + 1}. ${f.name} (${f.size} bytes, ${f.time})`);
+            });
+            
             const foundFile = recentFiles[0].path;
-            if (fs.statSync(foundFile).size > 0) {
-              console.log(`✅ Fichier scanné trouvé: ${foundFile} (${fs.statSync(foundFile).size} bytes)`);
+            if (recentFiles[0].size > 0) {
+              console.log(`\n✅ Fichier scanné trouvé: ${foundFile} (${recentFiles[0].size} bytes)`);
               return resolve(foundFile);
+            } else {
+              console.warn(`⚠️ Fichier trouvé mais vide: ${foundFile}`);
             }
+          } else {
+            console.warn(`⚠️ Aucun fichier PDF trouvé avec le critère "${profileName}"`);
           }
         } catch (searchError) {
-          console.error('Erreur recherche fichier:', searchError);
-        }
-        
-        // Fallback: vérifier les chemins possibles
-        for (const filePath of possibleFiles) {
-          if (fs.existsSync(filePath) && fs.statSync(filePath).size > 0) {
-            console.log(`✅ Fichier scanné créé: ${filePath} (${fs.statSync(filePath).size} bytes)`);
-            return resolve(filePath);
-          }
+          console.error('❌ Erreur recherche fichier:', searchError);
         }
         
         // ❌ Échec du scan
         if (code !== 0) {
           const errorMsg = stderr || stdout || 'Erreur inconnue';
           
-          // Messages d'erreur améliorés avec solutions
-          let userMessage = errorMsg;
+          let userMessage = `❌ Erreur lors du scan:\n${errorMsg}\n\n`;
           
-          if (errorMsg.includes('TWAIN session open error')) {
-            userMessage = `❌ Impossible d'ouvrir le scanner via TWAIN.\n\n` +
-              `🔧 Solutions:\n` +
-              `1. Dans votre profil, changez le Device.ID pour "EPSON9ABE4C (L386 Series)" (driver WIA)\n` +
-              `2. Fermez toute application utilisant le scanner (HP Smart, Epson Scan, etc.)\n` +
-              `3. Redémarrez le scanner\n` +
-              `4. Mettez à jour les drivers EPSON`;
-          } else if (errorMsg.includes('No scanner found') || errorMsg.includes('No device found')) {
-            userMessage = `❌ Aucun scanner détecté.\n\n` +
-              `🔧 Solutions:\n` +
-              `1. Vérifiez que le scanner est allumé et connecté en USB\n` +
-              `2. Testez le scanner avec l'application Epson Scan\n` +
-              `3. Réinstallez les drivers du scanner\n` +
-              `4. Essayez un autre port USB`;
+          if (errorMsg.includes('scanner') && errorMsg.includes('introuvable')) {
+            userMessage += `🔧 Le scanner n'a pas été trouvé. Vérifications:\n`;
+            userMessage += `   1. Driver configuré: ${driver}\n`;
+            userMessage += `   2. Device configuré: ${deviceArg || '(par défaut)'}\n`;
+            userMessage += `   3. Vérifiez que le scanner est allumé et connecté\n`;
+            userMessage += `   4. Testez avec NAPS2 directement\n`;
+            userMessage += `   5. Comparez Device.ID avec un profil qui fonctionne\n`;
           } else if (errorMsg.includes('0 page(s) scanned')) {
-            userMessage = `❌ Aucune page scannée.\n\n` +
-              `🔧 Solutions:\n` +
-              `1. Vérifiez qu'il y a du papier dans le chargeur\n` +
-              `2. Ouvrez le scanner et vérifiez qu'il n'y a pas de bourrage\n` +
-              `3. Essayez de scanner depuis l'application Epson Scan`;
+            userMessage += `🔧 Solutions:\n`;
+            userMessage += `   1. Vérifiez qu'il y a du papier\n`;
+            userMessage += `   2. Vérifiez qu'il n'y a pas de bourrage\n`;
+            userMessage += `   3. Testez avec Epson Scan\n`;
           }
           
-          return reject(new Error(`Erreur lors du scan:\n${userMessage}`));
+          return reject(new Error(userMessage));
         }
         
-        reject(new Error(`Le fichier scanné n'a pas été créé ou est vide. Vérifiez le dossier: ${path.dirname(outputPattern)}`));
+        reject(new Error(`Le fichier scanné n'a pas été créé. Dossier: ${searchDir}`));
       });
       
       naps2Process.on('error', (error) => {
         console.error(`❌ Erreur lancement NAPS2:`, error);
-        reject(new Error(`Impossible de lancer NAPS2: ${error.message}\n\nVérifiez que NAPS2.Console.exe existe dans: ${naps2Path}`));
+        reject(new Error(`Impossible de lancer NAPS2: ${error.message}\n\nVérifiez: ${naps2Path}`));
       });
     });
     
@@ -362,6 +358,7 @@ async function listScanners() {
           name: trimmed,
           driver: 'wia'
         });
+        console.log(`  ✅ Scanner ajouté: "${trimmed}" avec driver="wia" et id="${trimmed}"`);
       }
     });
 
@@ -401,6 +398,7 @@ async function listScanners() {
           name: trimmed,
           driver: 'twain'
         });
+        console.log(`  ✅ Scanner ajouté: "${trimmed}" avec driver="twain" et id="${trimmed}"`);
       }
     });
 

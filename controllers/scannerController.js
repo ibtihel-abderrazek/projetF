@@ -101,60 +101,55 @@ class ScannerController {
             throw error;
         }
     }
-
-   /**
-     * Parser la sortie de NAPS2
-     */
-    parseScannerOutput(output, driver) {
-        if (!output || output.trim() === '') {
-            console.log(`Aucune sortie de NAPS2 pour ${driver}`);
-            return [];
-        }
-
-        console.log(`Sortie brute NAPS2 (${driver}):`, output);
-        
-        const lines = output.split('\n').filter(line => line.trim());
-        const scanners = [];
-        
-        lines.forEach((line, index) => {
-            line = line.trim();
-            
-            // Ignorer les lignes vides et les messages système
-            if (line === '' || 
-                line.includes('Qt:') || 
-                line.includes('Untested') ||
-                line.includes('No devices') || 
-                line.includes('Beginning') ||
-                line.includes('Starting') ||
-                line.includes('Finished') ||
-                line.includes('Error')) {
-                return;
-            }
-            
-            // ✅ CORRECTION: S'assurer que le driver est bien attaché au scanner
-            if (line.length > 2) {
-                const driverLabel = driver.toUpperCase();
-                const connectionType = driver === 'twain' ? 'avec fil' : 'sans fil';
-                
-                // ✅ IMPORTANT: Créer un ID unique qui inclut le driver
-                const scannerId = `${driver}_${line}`;
-                
-                scanners.push({
-                    id: scannerId,
-                    name: line, // ✅ Nom original sans modification
-                    driver: driver, // ✅ CRITIQUE: Le driver DOIT être défini ici
-                    status: 'available',
-                    displayName: `${line} (${driverLabel} - ${connectionType})`
-                });
-                
-                // ✅ DEBUG: Confirmer que le driver est bien attaché
-                console.log(`  ✅ Scanner ajouté: "${line}" avec driver="${driver}" et id="${scannerId}"`);
-            }
-        });
-        
-        console.log(`${scanners.length} scanner(s) trouvé(s) avec ${driver}`);
-        return scanners;
+/**
+ * Parser la sortie de NAPS2 (VERSION CORRIGÉE)
+ */
+parseScannerOutput(output, driver) {
+    if (!output || output.trim() === '') {
+        console.log(`Aucune sortie de NAPS2 pour ${driver}`);
+        return [];
     }
+
+    console.log(`Sortie brute NAPS2 (${driver}):`, output);
+    
+    const lines = output.split('\n').filter(line => line.trim());
+    const scanners = [];
+    
+    lines.forEach((line, index) => {
+        line = line.trim();
+        
+        // Ignorer les lignes vides et les messages système
+        if (line === '' || 
+            line.includes('Qt:') || 
+            line.includes('Untested') ||
+            line.includes('No devices') || 
+            line.includes('Beginning') ||
+            line.includes('Starting') ||
+            line.includes('Finished') ||
+            line.includes('Error')) {
+            return;
+        }
+        
+        if (line.length > 2) {
+            const driverLabel = driver.toUpperCase();
+            const connectionType = driver === 'twain' ? 'avec fil' : 'sans fil';
+            
+            scanners.push({
+                id: line,
+                name: line,
+                driver: driver,
+                status: 'available',
+                displayName: `${line} (${driverLabel} - ${connectionType})`,
+                isConnected: true  // ✅ NOUVEAU: Marquer comme connecté
+            });
+            
+            console.log(`  ✅ Scanner ajouté: "${line}" avec driver="${driver}"`);
+        }
+    });
+    
+    console.log(`${scanners.length} scanner(s) trouvé(s) avec ${driver}`);
+    return scanners;
+}
 }
 
 // Export du contrôleur

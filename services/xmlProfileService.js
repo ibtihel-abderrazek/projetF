@@ -49,26 +49,69 @@ async function addProfile(profileData) {
       throw new Error("Un profil avec ce nom existe déjà");
     }
 
-    // ✅ DEBUG: Afficher toutes les données reçues
+    console.log('📋 === CRÉATION DE PROFIL ===');
     console.log('📋 Données profileData reçues:', JSON.stringify(profileData, null, 2));
 
-    // ✅ CORRECTION 1: Récupérer le driver depuis les données du formulaire
+    // ✅ CORRECTION CRITIQUE 1: Récupérer le driver
     const driverName = profileData.DriverName || 'twain';
-    console.log(`📋 Driver sélectionné pour le nouveau profil: "${driverName}"`);
+    console.log(`📋 Driver sélectionné: "${driverName}"`);
 
-    // Device.Name et Device.ID ont maintenant la même valeur (nom du scanner)
-    const deviceName = profileData['Device.Name'] || profileData.DeviceName || 'TWAIN2 FreeImage Software Scanner';
-    const deviceID = profileData['Device.ID'] || deviceName;
+    // ✅ CORRECTION CRITIQUE 2: Gérer correctement Device.Name et Device.ID
+    // Device.Name = nom lisible du scanner
+    // Device.ID = identifiant technique (DOIT correspondre exactement à ce que NAPS2 attend)
+    
+    let deviceName = profileData['Device.Name'] || profileData.DeviceName;
+    let deviceID = profileData['Device.ID'];
+    
+    console.log(`📋 Device.Name initial: "${deviceName}"`);
+    console.log(`📋 Device.ID initial: "${deviceID}"`);
+    
+    // ✅ CORRECTION CRITIQUE 3: Extraire l'ID réel du nom complet
+    // Si deviceName contient "(WIA - sans fil)" ou "(TWAIN - avec fil)", 
+    // extraire seulement le nom du scanner
+    if (deviceName) {
+      // Enlever les suffixes ajoutés par l'interface (WIA/TWAIN)
+      deviceName = deviceName
+        .replace(/\s*\(WIA\s*-\s*sans fil\)\s*$/i, '')
+        .replace(/\s*\(TWAIN\s*-\s*avec fil\)\s*$/i, '')
+        .trim();
+      
+      console.log(`📋 Device.Name nettoyé: "${deviceName}"`);
+    }
+    
+    // ✅ CORRECTION CRITIQUE 4: Device.ID doit être le nom exact du scanner
+    // (pas le format "wia_SCANNERNAME" ou "twain_SCANNERNAME")
+    if (deviceID) {
+      // Enlever le préfixe "wia_" ou "twain_" si présent
+      deviceID = deviceID
+        .replace(/^(wia|twain)_/i, '')
+        .trim();
+      
+      console.log(`📋 Device.ID nettoyé: "${deviceID}"`);
+    }
+    
+    // ✅ Si Device.ID n'est pas défini, utiliser Device.Name
+    if (!deviceID && deviceName) {
+      deviceID = deviceName;
+      console.log(`📋 Device.ID copié depuis Device.Name: "${deviceID}"`);
+    }
 
+    // ✅ Vérification finale
+    if (!deviceName || !deviceID) {
+      throw new Error('Device.Name et Device.ID sont obligatoires pour créer un profil');
+    }
+
+    console.log(`📋 === VALEURS FINALES ===`);
+    console.log(`📋 DriverName: "${driverName}"`);
     console.log(`📋 Device.Name: "${deviceName}"`);
     console.log(`📋 Device.ID: "${deviceID}"`);
-    console.log(`📋 DriverName final: "${driverName}"`);
 
+    // ✅ Construction du profil avec les valeurs correctes
     const newProfile = {
       Version: [profileData.Version || '5'],
       Device: [{
-        ID: [deviceID],
-        Name: [deviceName],
+        ID: [deviceID],  // ✅ ID technique nettoyé
+        Name: [deviceName],  // ✅ Nom lisible nettoyé
         IconUri: [{ $: { 'xsi:nil': 'true' } }],
         ConnectionUri: [{ $: { 'xsi:nil': 'true' } }]
       }],
@@ -85,8 +128,7 @@ async function addProfile(profileData) {
         }],
         Duplex: [profileData.Duplex || '']
       }],
-      // ✅ CORRECTION 2: Utiliser le driver sélectionné
-      DriverName: [driverName],
+      DriverName: [driverName],  // ✅ Driver correct
       DisplayName: [profileData.DisplayName],
       IconID: [profileData.IconID || '0'],
       MaxQuality: [profileData.MaxQuality === 'on' ? 'true' : (profileData.MaxQuality || 'false')],
@@ -104,13 +146,13 @@ async function addProfile(profileData) {
       PaperSource: [profileData.PaperSource || 'Glass'],
       EnableAutoSave: [profileData.EnableAutoSave === 'on' ? 'true' : (profileData.EnableAutoSave || 'false')],
       AutoSaveSettings: profileData.AutoSaveSettings && Object.keys(profileData.AutoSaveSettings).length > 0 
-      ? [{
-          FilePath: [profileData.AutoSaveSettings.FilePath || '$(DD)-$(MM)-$(YYYY)-$(n)'],
-          PromptForFilePath: [profileData.AutoSaveSettings.PromptForFilePath || 'false'],
-          ClearImagesAfterSaving: [profileData.AutoSaveSettings.ClearImagesAfterSaving || 'false'],
-          Separator: [profileData.AutoSaveSettings.Separator || 'FilePerPage']
-        }]
-      : [{ $: { 'xsi:nil': 'true' } }],
+        ? [{
+            FilePath: [profileData.AutoSaveSettings.FilePath || '$(DD)-$(MM)-$(YYYY)-$(n)'],
+            PromptForFilePath: [profileData.AutoSaveSettings.PromptForFilePath || 'false'],
+            ClearImagesAfterSaving: [profileData.AutoSaveSettings.ClearImagesAfterSaving || 'false'],
+            Separator: [profileData.AutoSaveSettings.Separator || 'FilePerPage']
+          }]
+        : [{ $: { 'xsi:nil': 'true' } }],
       Quality: [profileData.Quality || '75'],
       AutoDeskew: [profileData.AutoDeskew === 'on' ? 'true' : (profileData.AutoDeskew || 'false')],
       RotateDegrees: [profileData.RotateDegrees || '0'],
@@ -132,7 +174,6 @@ async function addProfile(profileData) {
     };
 
     console.log("✅ Profil construit avec succès");
-    console.log(`📋 DriverName dans le profil: "${newProfile.DriverName[0]}"`);
 
     const xmlObj = await readProfilesXml();
     const profiles = xmlObj?.ArrayOfScanProfile?.ScanProfile || [];
@@ -140,7 +181,10 @@ async function addProfile(profileData) {
     xmlObj.ArrayOfScanProfile.ScanProfile = profiles;
     await writeProfilesXml(xmlObj);
 
-    console.log(`✅ Profil "${profileData.DisplayName}" créé avec driver="${driverName}"`);
+    console.log(`✅ Profil "${profileData.DisplayName}" créé avec succès`);
+    console.log(`📋 Vérifiez que dans profiles.xml:`);
+    console.log(`   <Device><ID>${deviceID}</ID><Name>${deviceName}</Name></Device>`);
+    console.log(`   <DriverName>${driverName}</DriverName>`);
 
     return newProfile;
   } catch (error) {

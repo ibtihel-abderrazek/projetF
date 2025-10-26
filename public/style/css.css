@@ -656,14 +656,46 @@
             color: var(--gray-700);
             font-size: 13px;
         }
-        select option.disconnected-scanner {
-            color: #dc3545;
-            font-style: italic;
-            }
+        select option[data-disconnected="true"] {
+    background-color: #fff3cd !important;
+    color: #856404 !important;
+    font-style: italic;
+}
 
-        select option.disconnected-scanner::before {
-             content: "⚠️ ";
-         }
+/* Style alternatif avec icône warning */
+select option[data-disconnected="true"]::before {
+    content: "⚠️ ";
+}
+
+/* Sur Firefox */
+@-moz-document url-prefix() {
+    select option[data-disconnected="true"] {
+        background-color: #fff3cd;
+        color: #856404;
+    }
+}
+
+/* Effet hover sur les options déconnectées */
+select option[data-disconnected="true"]:hover {
+    background-color: #ffc107 !important;
+}
+
+/* Message d'avertissement sous le select */
+.scanner-disconnected-warning {
+    display: block;
+    margin-top: 5px;
+    padding: 8px 12px;
+    background-color: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 4px;
+    color: #856404;
+    font-size: 0.9em;
+}
+
+.scanner-disconnected-warning::before {
+    content: "⚠️ ";
+    font-weight: bold;
+}
         .form-group select, .form-group input {
             width: 100%;
             padding: 8px 12px;

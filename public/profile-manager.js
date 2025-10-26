@@ -1095,7 +1095,7 @@ async scanAndPatchWithProfile() {
     }
 
 /**
- * Rend un onglet d'édition avec toutes les corrections (VERSION FINALE)
+ * Rend un onglet d'édition avec scanner déconnecté préservé (VERSION CORRIGÉE)
  */
 renderEditTab(containerId, fields, data) {
     const container = document.getElementById(containerId);
@@ -1108,14 +1108,49 @@ renderEditTab(containerId, fields, data) {
     console.log(`📋 Données reçues:`, {
         'Device.Name': data['Device.Name'],
         'Device.ID': data['Device.ID'],
-        'DriverName': data.DriverName,
-        'DeviceName': data.DeviceName,
-        'Device objet': data.Device
+        'DriverName': data.DriverName
     });
 
-    // ✅ NOUVEAU: Extraire le DriverName dès le début pour l'utiliser partout
     const profileDriverName = data.DriverName || data['DriverName'] || 'twain';
-    console.log(`📋 DriverName du profil: "${profileDriverName}"`);
+    const profileDeviceName = data['Device.Name'];
+    const profileDeviceId = data['Device.ID'];
+    
+    console.log(`📋 Scanner du profil:`, {
+        driver: profileDriverName,
+        deviceName: profileDeviceName,
+        deviceId: profileDeviceId
+    });
+
+    // ✅ NOUVEAU: Vérifier si le scanner du profil est dans la liste des scanners connectés
+    let scannerFound = false;
+    if (profileDeviceName) {
+        scannerFound = this.scanners.some(s => 
+            s.name === profileDeviceName && s.driver === profileDriverName
+        );
+        
+        console.log(`📋 Scanner "${profileDeviceName}" ${scannerFound ? '✅ trouvé' : '⚠️ non trouvé'} dans les scanners connectés`);
+    }
+
+    // ✅ NOUVEAU: Si le scanner n'est pas trouvé, l'ajouter temporairement comme déconnecté
+    let scannersForRendering = [...this.scanners];
+    
+    if (!scannerFound && profileDeviceName) {
+        console.warn(`⚠️ Scanner du profil "${profileDeviceName}" non connecté, ajout temporaire`);
+        
+        const driverLabel = profileDriverName.toUpperCase();
+        const connectionType = profileDriverName === 'twain' ? 'avec fil' : 'sans fil';
+        
+        scannersForRendering.unshift({
+            id: profileDeviceName,
+            name: profileDeviceName,
+            driver: profileDriverName,
+            status: 'disconnected',
+            displayName: `⚠️ ${profileDeviceName} (${driverLabel} - Déconnecté)`,
+            isConnected: false
+        });
+        
+        console.log(`✅ Scanner déconnecté ajouté pour l'édition`);
+    }
 
     let html = '';
     Object.entries(fields).forEach(([fieldName, fieldConfig]) => {
@@ -1123,72 +1158,31 @@ renderEditTab(containerId, fields, data) {
         
         console.log(`📋 Traitement du champ "${fieldName}":`, {
             'valeur initiale': fieldValue,
-            'type': typeof fieldValue,
-            'config': fieldConfig
+            'type': typeof fieldValue
         });
         
-        // ✅ CORRECTION SPÉCIALE pour DriverName
         if (fieldName === 'DriverName') {
             fieldValue = profileDriverName;
-            console.log(`  ✅ DriverName final: "${fieldValue}"`);
         }
         
-        // ✅ CORRECTION SPÉCIALE pour Device.Name
         if (fieldName === 'Device.Name') {
-            if (!fieldValue) {
-                // Essayer depuis l'objet Device
-                if (data.Device) {
-                    if (typeof data.Device === 'object') {
-                        fieldValue = data.Device.Name || data.Device.name;
-                    } else if (typeof data.Device === 'string') {
-                        fieldValue = data.Device;
-                    }
-                }
-            }
-            
-            // Sinon depuis les champs racine
-            if (!fieldValue) {
-                fieldValue = data.DeviceName || data['Device.Name'];
-            }
-            
-            console.log(`  ✅ Device.Name final: "${fieldValue}"`);
+            fieldValue = profileDeviceName;
         }
         
-        // ✅ CORRECTION SPÉCIALE pour Device.ID
         if (fieldName === 'Device.ID') {
-            if (!fieldValue) {
-                // Essayer depuis l'objet Device
-                if (data.Device) {
-                    if (typeof data.Device === 'object') {
-                        fieldValue = data.Device.ID || data.Device.id;
-                    }
-                }
-            }
-            
-            // Sinon depuis les champs racine
-            if (!fieldValue) {
-                fieldValue = data.DeviceID || data['Device.ID'];
-            }
-            
-            console.log(`  ✅ Device.ID final: "${fieldValue}"`);
+            fieldValue = profileDeviceId;
         }
         
-        // Utiliser la valeur par défaut si aucune valeur n'existe
         if ((fieldValue === undefined || fieldValue === null || fieldValue === '') && fieldConfig.default) {
-            console.log(`  📋 Utilisation de la valeur par défaut: "${fieldConfig.default}"`);
             fieldValue = fieldConfig.default;
         }
         
-        // Synchronisation FilePath avec OcrNamingPattern
         if (fieldName === 'AutoSaveSettings.FilePath' && !fieldValue && data.OcrNamingPattern) {
             fieldValue = data.OcrNamingPattern;
-            console.log(`  📋 Synchronisation FilePath <- OcrNamingPattern: "${fieldValue}"`);
         }
         
-        // ✅ CRITIQUE: Créer un objet fieldData avec TOUTES les données nécessaires
-        const fieldData = { ...data }; // Copier toutes les données
+        const fieldData = { ...data };
         
-        // Ajouter/remplacer la valeur du champ actuel
         if (fieldName.includes('.')) {
             const parts = fieldName.split('.');
             let current = fieldData;
@@ -1201,22 +1195,17 @@ renderEditTab(containerId, fields, data) {
             fieldData[fieldName] = fieldValue;
         }
         
-        // ✅ S'assurer que DriverName est toujours présent dans fieldData
         if (!fieldData.DriverName) {
             fieldData.DriverName = profileDriverName;
         }
         
-        // ✅ LOG FINAL: Afficher la valeur qui sera utilisée par createField
-        console.log(`  🎯 Valeur finale pour createField: "${fieldValue}"`);
-        
-        // Créer le champ HTML avec les données complètes
-        html += `<div class="form-group">${this.formManager.createField(fieldName, fieldConfig, fieldData, this.scanners)}</div>`;
+        // ✅ CRITIQUE: Passer la liste avec le scanner déconnecté
+        html += `<div class="form-group">${this.formManager.createField(fieldName, fieldConfig, fieldData, scannersForRendering)}</div>`;
     });
     
     console.log(`✅ Rendu HTML de l'onglet ${containerId} terminé`);
     container.innerHTML = html;
     
-    // ✅ NOUVEAU: Vérifier immédiatement après le rendu
     setTimeout(() => {
         const driverSelect = container.querySelector('select[name="DriverName"]');
         const deviceSelect = container.querySelector('select[name="Device.Name"]');

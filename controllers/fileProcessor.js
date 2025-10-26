@@ -10,10 +10,6 @@ const fileService = require('../services/fileService');
  */
 exports.processFile = async (req, res) => {
     try {
-        console.log("===== REQUÊTE REÇUE =====");
-        console.log("Body :", req.body);
-        console.log("Fichier :", req.file);
-        console.log("==========================");
 
         // Validation pour le mode scan
         if (req.body.scan === "true") {

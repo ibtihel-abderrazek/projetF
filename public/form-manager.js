@@ -367,14 +367,13 @@ export class FormManager {
     }
 
 /**
- * Crée un select HTML avec support du filtrage par driver (VERSION CORRIGÉE)
+ * Crée un select HTML avec support du filtrage par driver et scanners déconnectés (VERSION FINALE)
  */
 createSelectHtml(fieldName, fieldConfig, value, scanners, fieldId) {
     let options = '';
     
-    // ✅ Déterminer la valeur effective (valeur actuelle ou valeur par défaut)
     const effectiveValue = (value !== undefined && value !== null && value !== '') 
-        ? value 
+        ? value  
         : fieldConfig.default;
     
     console.log(`📋 createSelectHtml - Champ: ${fieldName}`, {
@@ -384,7 +383,6 @@ createSelectHtml(fieldName, fieldConfig, value, scanners, fieldId) {
     });
     
     if (fieldConfig.source === 'scanners') {
-        // ✅ Fonction de normalisation pour comparaison insensible à la casse
         const normalizeValue = (val) => {
             if (!val) return '';
             return String(val).trim().toLowerCase().replace(/\s+/g, ' ');
@@ -394,71 +392,68 @@ createSelectHtml(fieldName, fieldConfig, value, scanners, fieldId) {
         
         console.log(`📋 Scanner select - valeur recherchée: "${cleanEffective}"`);
         
-        // ✅ Si le champ a un filtre par driver, ajouter l'attribut data
         const filterAttr = fieldConfig.filterBy ? `data-filter-by="${fieldConfig.filterBy}"` : '';
         
-        // ✅ Vérifier si le scanner du profil existe dans la liste des scanners connectés
-        let scannerFound = false;
-        let disconnectedScanner = null;
+        // ✅ NOUVEAU: Séparer les scanners connectés et déconnectés
+        const connectedScanners = scanners.filter(s => s.isConnected !== false);
+        const disconnectedScanners = scanners.filter(s => s.isConnected === false);
         
-        if (effectiveValue) {
-            scannerFound = scanners.some(s => normalizeValue(s.name) === cleanEffective);
-            
-            // Si le scanner n'est pas trouvé, c'est qu'il est déconnecté
-            if (!scannerFound) {
-                console.warn(`⚠️ Scanner "${effectiveValue}" non trouvé dans la liste (probablement déconnecté)`);
-                disconnectedScanner = {
-                    name: effectiveValue,
-                    displayName: `⚠️ ${effectiveValue} (Déconnecté)`,
-                    driver: null, // On ne connaît pas le driver exact
-                    isDisconnected: true
-                };
-            }
-        }
+        console.log(`📋 Scanners: ${connectedScanners.length} connectés, ${disconnectedScanners.length} déconnectés`);
         
-        // ✅ Ajouter d'abord le scanner déconnecté s'il existe (en début de liste)
-        if (disconnectedScanner) {
-            options = `<option value="${Utils.escapeHtml(disconnectedScanner.name)}" 
-                              data-scanner-id="${Utils.escapeHtml(disconnectedScanner.name)}" 
-                              data-disconnected="true"
-                              selected
-                              class="disconnected-scanner">
-                          ${Utils.escapeHtml(disconnectedScanner.displayName)}
-                       </option>`;
-        }
+        let hasDisconnectedWarning = false;
         
-        // ✅ Générer les options pour les scanners connectés
-        options += scanners.map((scanner) => {
-            const optionValue = scanner.name;
-            const cleanOption = normalizeValue(optionValue);
-            
-            // ✅ Comparaison insensible à la casse et aux espaces
-            const isSelected = cleanEffective === cleanOption;
+        // ✅ PRIORITÉ 1: Ajouter les scanners déconnectés EN PREMIER (avec style spécial)
+        disconnectedScanners.forEach(scanner => {
+            const isSelected = cleanEffective === normalizeValue(scanner.name);
             const selected = isSelected ? 'selected' : '';
-            
-            // ✅ Ajouter le driver comme attribut data pour le filtrage
             const driverAttr = scanner.driver ? `data-driver="${scanner.driver}"` : '';
             
             if (isSelected) {
-                console.log(`  ✅ Scanner sélectionné trouvé:`, {
-                    name: scanner.name,
-                    driver: scanner.driver,
-                    displayName: scanner.displayName
-                });
+                hasDisconnectedWarning = true;
+                console.log(`  ⚠️ Scanner déconnecté sélectionné:`, scanner.name);
             }
             
-            return `<option value="${Utils.escapeHtml(optionValue)}" 
-                           data-scanner-id="${Utils.escapeHtml(scanner.name)}" 
-                           ${driverAttr}
-                           ${selected}>
-                      ${Utils.escapeHtml(scanner.displayName || scanner.name)}
-                    </option>`;
-        }).join('');
+            options += `<option value="${Utils.escapeHtml(scanner.name)}" 
+                               data-scanner-id="${Utils.escapeHtml(scanner.name)}" 
+                               data-disconnected="true"
+                               ${driverAttr}
+                               ${selected}
+                               class="disconnected-scanner">
+                          ${Utils.escapeHtml(scanner.displayName)}
+                        </option>`;
+        });
         
-        return `<select id="${fieldId}" name="${fieldName}" ${filterAttr}>${options}</select>`;
+        // ✅ PRIORITÉ 2: Ajouter les scanners connectés
+        connectedScanners.forEach(scanner => {
+            const optionValue = scanner.name;
+            const cleanOption = normalizeValue(optionValue);
+            const isSelected = cleanEffective === cleanOption;
+            const selected = isSelected ? 'selected' : '';
+            const driverAttr = scanner.driver ? `data-driver="${scanner.driver}"` : '';
+            
+            if (isSelected) {
+                console.log(`  ✅ Scanner connecté sélectionné:`, scanner.name);
+            }
+            
+            options += `<option value="${Utils.escapeHtml(optionValue)}" 
+                               data-scanner-id="${Utils.escapeHtml(scanner.name)}" 
+                               ${driverAttr}
+                               ${selected}>
+                          ${Utils.escapeHtml(scanner.displayName || scanner.name)}
+                        </option>`;
+        });
+        
+        // ✅ NOUVEAU: Ajouter un message d'avertissement si un scanner déconnecté est sélectionné
+        const warningHtml = hasDisconnectedWarning 
+            ? `<small class="scanner-disconnected-warning">
+                 Ce scanner n'est pas actuellement connecté. Reconnectez-le avant de scanner.
+               </small>` 
+            : '';
+        
+        return `<select id="${fieldId}" name="${fieldName}" ${filterAttr}>${options}</select>${warningHtml}`;
         
     } else if (fieldConfig.options) {
-        // ✅ Gestion des options normales (pas scanners)
+        // Gestion des options normales (pas scanners)
         if (Array.isArray(fieldConfig.options) && typeof fieldConfig.options[0] === 'object') {
             options = fieldConfig.options.map(option => {
                 const isSelected = effectiveValue === option.value;
@@ -483,7 +478,6 @@ createSelectHtml(fieldName, fieldConfig, value, scanners, fieldId) {
             }).join('');
         }
         
-        // ✅ Ajouter l'event handler si le champ a un onChange
         const onChangeAttr = fieldConfig.onChange ? `data-onchange="${fieldConfig.onChange}"` : '';
         return `<select id="${fieldId}" name="${fieldName}" ${onChangeAttr}>${options}</select>`;
     }
@@ -593,7 +587,7 @@ createSelectHtml(fieldName, fieldConfig, value, scanners, fieldId) {
         this.setupFilePathNamingSync(form);
     }
 /**
- * Configure le filtrage des scanners par driver (VERSION CORRIGÉE)
+ * Configure le filtrage des scanners par driver avec support déconnectés (VERSION CORRIGÉE)
  */
 setupDriverFilter(form) {
     const driverSelect = form.querySelector('select[name="DriverName"]');
@@ -606,8 +600,6 @@ setupDriverFilter(form) {
     
     console.log('🔧 Initialisation du filtrage par driver');
     
-    // ✅ CRITIQUE: Lire les valeurs AVANT tout traitement
-    // Ces valeurs viennent du HTML généré par createSelectHtml avec selected="selected"
     const initialDeviceValue = deviceSelect.value;
     const initialDriverValue = driverSelect.value;
     
@@ -616,11 +608,13 @@ setupDriverFilter(form) {
         device: initialDeviceValue
     });
     
-    // ✅ Stocker aussi l'option sélectionnée pour la retrouver
     const initialSelectedOption = deviceSelect.querySelector('option[selected]');
     const targetDeviceName = initialSelectedOption ? initialSelectedOption.value : initialDeviceValue;
     
-    console.log(`📋 Scanner cible à préserver: "${targetDeviceName}"`);
+    // ✅ NOUVEAU: Vérifier si c'est un scanner déconnecté
+    const isDisconnected = initialSelectedOption?.getAttribute('data-disconnected') === 'true';
+    
+    console.log(`📋 Scanner cible à préserver: "${targetDeviceName}" (déconnecté: ${isDisconnected})`);
     
     const filterScanners = (preserveInitialValue = false) => {
         const selectedDriver = driverSelect.value;
@@ -630,20 +624,35 @@ setupDriverFilter(form) {
         let visibleCount = 0;
         let firstVisibleOption = null;
         let targetOption = null;
-        const currentSelectedValue = deviceSelect.value;
         let currentOptionStillVisible = false;
         
         options.forEach((option) => {
             const optionDriver = option.getAttribute('data-driver');
             const optionValue = option.value;
+            const isOptionDisconnected = option.getAttribute('data-disconnected') === 'true';
             
-            // Si l'option n'a pas de driver, la masquer
+            // ✅ NOUVEAU: Les scanners déconnectés sont TOUJOURS visibles s'ils correspondent au driver
+            if (isOptionDisconnected) {
+                if (optionDriver === selectedDriver) {
+                    option.style.display = '';
+                    visibleCount++;
+                    
+                    if (preserveInitialValue && optionValue === targetDeviceName) {
+                        targetOption = option;
+                        console.log(`  🎯 Scanner déconnecté cible trouvé: "${optionValue}"`);
+                    }
+                } else {
+                    option.style.display = 'none';
+                }
+                return;
+            }
+            
+            // Pour les scanners connectés normaux
             if (!optionDriver) {
                 option.style.display = 'none';
                 return;
             }
             
-            // Afficher uniquement les options du driver sélectionné
             if (optionDriver === selectedDriver) {
                 option.style.display = '';
                 visibleCount++;
@@ -652,13 +661,12 @@ setupDriverFilter(form) {
                     firstVisibleOption = option;
                 }
                 
-                // ✅ Rechercher l'option cible (celle du profil)
                 if (preserveInitialValue && optionValue === targetDeviceName) {
                     targetOption = option;
-                    console.log(`  🎯 Option cible trouvée: "${optionValue}"`);
+                    console.log(`  🎯 Scanner connecté cible trouvé: "${optionValue}"`);
                 }
                 
-                if (optionValue === currentSelectedValue) {
+                if (optionValue === deviceSelect.value) {
                     currentOptionStillVisible = true;
                 }
             } else {
@@ -668,17 +676,14 @@ setupDriverFilter(form) {
         
         console.log(`  ✅ ${visibleCount} scanner(s) visible(s) pour le driver "${selectedDriver}"`);
         
-        // ✅ LOGIQUE CORRIGÉE: Priorité à la valeur du profil
+        // ✅ LOGIQUE: Priorité au scanner déconnecté du profil
         if (preserveInitialValue && targetOption) {
-            // Restaurer la valeur du profil
             console.log(`  🔄 Restauration de la valeur du profil: "${targetOption.value}"`);
             deviceSelect.value = targetOption.value;
             
-            // Synchroniser Device.ID
             const event = new Event('change', { bubbles: true });
             deviceSelect.dispatchEvent(event);
         } else if (!currentOptionStillVisible && visibleCount > 0) {
-            // Sinon, sélectionner la première option visible
             console.log(`  🔄 Sélection de la première option visible`);
             
             if (firstVisibleOption) {
@@ -690,7 +695,6 @@ setupDriverFilter(form) {
             }
         }
         
-        // Si aucun scanner visible, chercher un driver compatible
         if (visibleCount === 0 && !preserveInitialValue) {
             console.warn(`  ⚠️ Aucun scanner "${selectedDriver}" détecté`);
             
@@ -710,14 +714,11 @@ setupDriverFilter(form) {
         }
     };
     
-    // ✅ CORRECTION CRITIQUE: Ne PAS toucher aux valeurs, juste filtrer
     setTimeout(() => {
         console.log('🔄 Filtrage initial au chargement');
-        console.log(`📋 Valeurs à préserver: driver="${initialDriverValue}", device="${targetDeviceName}"`);
+        console.log(`📋 Valeurs à préserver: driver="${initialDriverValue}", device="${targetDeviceName}", déconnecté="${isDisconnected}"`);
         
-        // ✅ Toujours préserver les valeurs initiales lors du premier filtrage
         if (targetDeviceName) {
-            // Trouver le driver de ce scanner
             const targetOptionElement = Array.from(deviceSelect.querySelectorAll('option'))
                 .find(opt => opt.value === targetDeviceName);
             
@@ -725,22 +726,18 @@ setupDriverFilter(form) {
                 const correctDriver = targetOptionElement.getAttribute('data-driver');
                 console.log(`  📋 Driver correct pour "${targetDeviceName}": "${correctDriver}"`);
                 
-                // ✅ Forcer le driver correct AVANT de filtrer
                 if (correctDriver && driverSelect.value !== correctDriver) {
                     console.log(`  🔧 Correction du driver: "${driverSelect.value}" → "${correctDriver}"`);
                     driverSelect.value = correctDriver;
                 }
             }
             
-            // Filtrer en préservant la valeur
             filterScanners(true);
         } else {
-            // Pas de valeur initiale, filtrage normal
             filterScanners(false);
         }
     }, 200);
     
-    // Event listener pour les changements manuels
     driverSelect.addEventListener('change', () => {
         console.log('🔄 Changement manuel de driver détecté');
         filterScanners(false);
